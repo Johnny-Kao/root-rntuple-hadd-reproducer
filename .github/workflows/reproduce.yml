@@ -1,0 +1,102 @@
+name: Reproduce hadd checksum abort (ROOT 6.42 RC1)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official unmodified ROOT 6.42.00-rc1
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libtbb12 libgsl27 libpcre2-8-0 libxxhash0 liblz4-1 libzstd1 libfreetype6 >/dev/null
+          URL='https://root.cern/download/root_v6.42.00-rc1.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz'
+          TOTAL=397692613
+          CHUNK=$(( (TOTAL+7)/8 ))
+          mkdir -p /tmp/root-parts
+          for n in {0..7}; do
+            start=$((n*CHUNK))
+            end=$((start+CHUNK-1))
+            if [ "$end" -ge "$TOTAL" ]; then end=$((TOTAL-1)); fi
+            (
+              curl --silent --show-error --fail --location --retry 2 \
+                --connect-timeout 25 --max-time 390 --range "${start}-${end}" \
+                "$URL" -o "/tmp/root-parts/part${n}"
+              test "$(stat -c %s "/tmp/root-parts/part${n}")" -eq "$((end-start+1))"
+              echo "Verified ROOT binary chunk ${n}"
+            ) &
+          done
+          wait
+          cat /tmp/root-parts/part{0..7} > /tmp/root.tar.gz
+          test "$(stat -c %s /tmp/root.tar.gz)" -eq "$TOTAL"
+          gzip -t /tmp/root.tar.gz
+          tar -xzf /tmp/root.tar.gz -C "$GITHUB_WORKSPACE"
+          ROOTSYS="$GITHUB_WORKSPACE/root"
+          echo "ROOTSYS=$ROOTSYS" >> "$GITHUB_ENV"
+          echo "$ROOTSYS/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$ROOTSYS/lib" >> "$GITHUB_ENV"
+          "$ROOTSYS/bin/root-config" --version
+
+      - name: Compile minimal reproducer
+        shell: bash
+        run: |
+          set -euo pipefail
+          c++ -std=c++17 -O1 reproduce.cxx -o reproduce \
+            $(root-config --cflags --libs) -lROOTNTuple
+
+      - name: Check successful controls and expected aborts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/hadd-reproducer
+          cd /tmp/hadd-reproducer
+          REPRO="$GITHUB_WORKSPACE/reproduce"
+
+          "$REPRO" generate on_a.root 1 1 505
+          "$REPRO" generate on_b.root 2 1 505
+          "$REPRO" generate on_a_uncompressed.root 1 1 0
+          "$REPRO" generate off_a.root 1 0 505
+          "$REPRO" generate off_a_uncompressed.root 1 0 0
+          "$REPRO" generate off_b.root 2 0 505
+
+          echo "=== Control: checksum ON + ON (same compression) ==="
+          hadd -f505 control_same.root on_a.root on_b.root
+          "$REPRO" control_same.root
+
+          echo "=== Control: checksum ON + ON (different compression) ==="
+          hadd -f505 control_different.root on_a_uncompressed.root on_b.root
+          "$REPRO" control_different.root
+
+          assert_abort() {
+            local label="$1" a="$2" b="$3"
+            echo "=== Expected abort: $label ==="
+            set +e
+            timeout 30s hadd -f505 "$label.root" "$a" "$b" > "$label.log" 2>&1
+            local code=$?
+            set -e
+            echo "Exit: $code"
+            grep -E 'Fatal:|GetHasChecksum|Warning in' "$label.log" | tail -12 || true
+            if [ "$code" -ne 134 ] || ! grep -q 'sealedPageIt->GetHasChecksum()' "$label.log"; then
+              echo "::error::Expected checksum assertion and exit 134; observed $code for $label"
+              cat "$label.log"
+              return 1
+            fi
+            echo "EXPECTED_ABORT_CONFIRMED: $label"
+          }
+
+          assert_abort mixed_same off_a.root on_b.root
+          assert_abort mixed_different off_a_uncompressed.root on_b.root
+          assert_abort both_off off_a.root off_b.root
+
+          echo "REPRODUCER_PASS: 2 exact-data controls + 3 expected checksum aborts"
