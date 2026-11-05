@@ -31,7 +31,9 @@ hadd -f505 merged.root a.root b.root
 
 The last command aborts on the tested release candidate. Use `./reproduce merged.root` to verify 260 expected values if a merge succeeds. This helper creates small RNTuples with two fields and 130 entries each.
 
-The [GitHub Actions workflow](.github/workflows/reproduce.yml) runs all five combinations, verifies both successful controls by exact readback, and **passes when the expected aborts are observed**. It uses the official CERN binary and does not modify ROOT source code.
+The [GitHub Actions workflow](.github/workflows/reproduce.yml) runs all five combinations, verifies both successful controls by exact readback, and **passes when the expected aborts are observed**.
+
+**Verified public CI:** [ROOT 6.42.00-rc1 — 2 passing controls + 3 expected aborts (PASS)](https://github.com/Johnny-Kao/root-rntuple-hadd-reproducer/actions/runs/42122803975). It uses the official CERN binary and does not modify ROOT source code.
 
 ## What may be happening?
 
