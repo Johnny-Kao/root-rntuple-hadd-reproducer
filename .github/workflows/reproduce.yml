@@ -23,22 +23,22 @@ jobs:
           sudo apt-get install -y -qq libtbb12 libgsl27 libpcre2-8-0 libxxhash0 liblz4-1 libzstd1 libfreetype6 >/dev/null
           URL='https://root.cern/download/root_v6.42.00-rc1.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz'
           TOTAL=397692613
-          CHUNK=$(( (TOTAL+7)/8 ))
+          CHUNK=$(( (TOTAL+15)/16 ))
           mkdir -p /tmp/root-parts
-          for n in {0..7}; do
+          for n in {0..15}; do
             start=$((n*CHUNK))
             end=$((start+CHUNK-1))
             if [ "$end" -ge "$TOTAL" ]; then end=$((TOTAL-1)); fi
             (
-              curl --silent --show-error --fail --location --retry 2 \
-                --connect-timeout 25 --max-time 390 --range "${start}-${end}" \
+              curl --silent --show-error --fail --location --retry 8 --retry-all-errors --retry-delay 1 \
+                --connect-timeout 25 --max-time 180 --range "${start}-${end}" \
                 "$URL" -o "/tmp/root-parts/part${n}"
               test "$(stat -c %s "/tmp/root-parts/part${n}")" -eq "$((end-start+1))"
               echo "Verified ROOT binary chunk ${n}"
             ) &
           done
           wait
-          cat /tmp/root-parts/part{0..7} > /tmp/root.tar.gz
+          cat /tmp/root-parts/part{0..15} > /tmp/root.tar.gz
           test "$(stat -c %s /tmp/root.tar.gz)" -eq "$TOTAL"
           gzip -t /tmp/root.tar.gz
           tar -xzf /tmp/root.tar.gz -C "$GITHUB_WORKSPACE"
