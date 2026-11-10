@@ -31,10 +31,9 @@ struct Counts { unsigned on = 0, off = 0; };
 Counts metadata(const std::string &path) {
    auto source = RI::RPageSource::Create("ntuple", path, ROOT::RNTupleReadOptions());
    source->Attach();
-   source->LoadAllPageLists();
    const auto desc = source->GetSharedDescriptorGuard();
    Counts counts;
-   for (const auto &cluster : desc->GetActiveClusterIterable()) {
+   for (const auto &cluster : desc->GetClusterIterable()) {
       std::unordered_set<ROOT::DescriptorId_t> seen;
       for (const auto &col : desc->GetColumnIterable()) {
          const auto id = col.GetPhysicalId();
